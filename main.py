@@ -120,9 +120,15 @@ async def revoke_key(key_id: str):
     return JSONResponse(status_code=404, content={"error": "Key not found"})
 
 
+@app.head("/")
+async def health_head():
+    """Health check — respond to HEAD / without 405."""
+    return {}
+
+
 @app.api_route(
     "/{path:path}",
-    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
 )
 async def proxy(request: Request, path: str):
     # Skip key management routes
@@ -152,6 +158,7 @@ async def proxy(request: Request, path: str):
     upstream_headers = {
         "Content-Type": request.headers.get("content-type", "application/json"),
         "Authorization": f"Bearer {backend_key}",
+        "x-api-key": backend_key,
         "User-Agent": "Gateway/1.0",
     }
 
@@ -167,10 +174,11 @@ async def proxy(request: Request, path: str):
         target_url += f"?{query}"
 
     # --- Forward request with retry on 429/402 ---
-    max_retries = len(_backend_keys) if _backend_keys else 1
+    # Try every backend key once before giving up
+    max_retries = max(len(_backend_keys), 1)
     upstream = None
 
-    for _ in range(max_retries):
+    for attempt in range(max_retries):
         upstream = await client.request(
             method=request.method,
             url=target_url,
@@ -180,10 +188,12 @@ async def proxy(request: Request, path: str):
         )
         if upstream.status_code not in (429, 402):
             break
-        # Rotate key on 429 (rate limit) or 402 (no balance)
-        new_key = _next_backend_key()
-        upstream_headers["Authorization"] = f"Bearer {new_key}"
-        upstream_headers["x-api-key"] = new_key
+        if attempt < max_retries - 1:
+            # Rotate to next key and retry
+            new_key = _next_backend_key()
+            upstream_headers["Authorization"] = f"Bearer {new_key}"
+            upstream_headers["x-api-key"] = new_key
+        # else: exhausted all keys, fall through and return upstream error
 
     # --- Clean response headers ---
     clean_headers = _clean_response_headers(upstream.headers)
