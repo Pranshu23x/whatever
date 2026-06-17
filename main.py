@@ -131,9 +131,11 @@ async def proxy(request: Request, path: str):
 
     client: httpx.AsyncClient = request.app.state.client
 
-    # --- Authenticate user key ---
-    auth = request.headers.get("authorization", "")
-    user_key = auth.replace("Bearer ", "").strip()
+    # --- Authenticate user key (Claude Code uses x-api-key) ---
+    user_key = request.headers.get("x-api-key", "").strip()
+    if not user_key:
+        auth = request.headers.get("authorization", "")
+        user_key = auth.replace("Bearer ", "").strip()
 
     user_keys = load_user_keys()
     if user_key not in user_keys or not user_keys[user_key].get("active", False):
