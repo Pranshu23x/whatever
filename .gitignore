@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.pyc
+user_keys.json
+proxy-key.pem
