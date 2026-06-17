@@ -162,9 +162,10 @@ async def proxy(request: Request, path: str):
         "User-Agent": "Gateway/1.0",
     }
 
-    # Forward all anthropic-* headers from Claude Code
+    # Forward safe anthropic-* headers, strip beta ones (Evolink doesn't support them → 402)
     for name, value in request.headers.items():
-        if name.lower().startswith("anthropic"):
+        lower = name.lower()
+        if lower.startswith("anthropic") and "beta" not in lower:
             upstream_headers[name] = value
 
     # Strip beta query param, forward the rest
