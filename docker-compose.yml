@@ -5,4 +5,6 @@ services:
       - "0.0.0.0:8080:8080"
     env_file:
       - .env
+    volumes:
+      - ./user_keys.json:/app/user_keys.json
     restart: unless-stopped
