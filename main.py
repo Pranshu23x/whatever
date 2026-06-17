@@ -152,15 +152,21 @@ async def proxy(request: Request, path: str):
     upstream_headers = {
         "Content-Type": request.headers.get("content-type", "application/json"),
         "Authorization": f"Bearer {backend_key}",
-        "anthropic-version": request.headers.get("anthropic-version", "2023-06-01"),
         "User-Agent": "Gateway/1.0",
     }
 
-    target_url = f"{BASE_URL}/{path}"
-    if request.url.query:
-        target_url += f"?{request.url.query}"
+    # Forward all anthropic-* headers from Claude Code
+    for name, value in request.headers.items():
+        if name.lower().startswith("anthropic"):
+            upstream_headers[name] = value
 
-    # --- Forward request with retry on 429 ---
+    # Strip beta query param, forward the rest
+    query = str(request.url.query).replace("beta=true&", "").replace("beta=true", "").strip("&?")
+    target_url = f"{BASE_URL}/{path}"
+    if query:
+        target_url += f"?{query}"
+
+    # --- Forward request with retry on 429/402 ---
     max_retries = len(_backend_keys) if _backend_keys else 1
     upstream = None
 
@@ -172,10 +178,12 @@ async def proxy(request: Request, path: str):
             content=body,
             timeout=300.0,
         )
-        if upstream.status_code != 429:
+        if upstream.status_code not in (429, 402):
             break
-        # Rotate key on 429
-        upstream_headers["Authorization"] = f"Bearer {_next_backend_key()}"
+        # Rotate key on 429 (rate limit) or 402 (no balance)
+        new_key = _next_backend_key()
+        upstream_headers["Authorization"] = f"Bearer {new_key}"
+        upstream_headers["x-api-key"] = new_key
 
     # --- Clean response headers ---
     clean_headers = _clean_response_headers(upstream.headers)
